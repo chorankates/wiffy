@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wiffy - Network Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .scan-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        input, select {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #764ba2;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #63408a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(118, 75, 162, 0.4);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .activity-feed {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f5f5f5;
+            border-radius: 5px;
+            padding: 15px;
+        }
+
+        .activity-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 0.9em;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .hosts-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .hosts-table th,
+        .hosts-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .hosts-table th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .hosts-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .hosts-table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .status-online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .status-connected {
+            background: #28a745;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+        }
+
+        .port-badge {
+            display: inline-block;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin: 2px;
+            font-size: 0.85em;
+            font-family: monospace;
+        }
+
+        .recent-scans {
+            margin-top: 20px;
+        }
+
+        .scan-item {
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .scan-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .scan-type {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+        }
+
+        .scan-time {
+            font-size: 0.85em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">
+        <div class="status-dot status-disconnected"></div>
+        <span>Connecting...</span>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>📡 Wiffy</h1>
+            <p class="subtitle">Network Scanner & Discovery Tool</p>
+        </header>
+
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-label">Total Hosts</div>
+                <div class="stat-value" id="totalHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Recent (24h)</div>
+                <div class="stat-value" id="recentHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Scans</div>
+                <div class="stat-value" id="totalScans">0</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="card">
+                <h2>Discovered Hosts</h2>
+                <div class="hosts-table-container">
+                    <table class="hosts-table" id="hostsTable">
+                        <thead>
+                            <tr>
+                                <th>Hostname</th>
+                                <th>IP Address</th>
+                                <th>MAC Address</th>
+                                <th>Open Ports</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hostsTableBody">
+                            <tr>
+                                <td colspan="5" class="empty-state">No hosts discovered yet. Start a scan!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div>
+                <div class="card">
+                    <h2>Start New Scan</h2>
+                    <form class="scan-form" id="scanForm">
+                        <div class="form-group">
+                            <label for="targetRange">Target Range</label>
+                            <input 
+                                type="text" 
+                                id="targetRange" 
+                                placeholder="e.g., 192.168.1.0/24"
+                                required
+                            >
+                        </div>
+
+                        <div class="button-group">
+                            <button type="submit" class="btn-primary" data-scan-type="quick">
+                                Quick Scan
+                            </button>
+                            <button type="submit" class="btn-secondary" data-scan-type="deep">
+                                Deep Scan
+                            </button>
+                        </div>
+                    </form>
+
+                    <div class="recent-scans" id="recentScans">
+                        <h3 style="margin-bottom: 10px; font-size: 1em; color: #666;">Recent Scans</h3>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h2>Activity Feed</h2>
+                    <div class="activity-feed" id="activityFeed">
+                        <div class="activity-item">Waiting for scan activity...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

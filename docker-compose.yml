@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  wiffy:
+    build: .
+    image: wiffy:latest
+    container_name: wiffy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - WIFFY_DB_PATH=/data/wiffy.db
+      - PORT=8080
+    # Required for network scanning
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+

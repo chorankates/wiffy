@@ -1,0 +1,26 @@
+# Systemd service file for Wiffy
+# Install to /etc/systemd/system/wiffy.service
+
+[Unit]
+Description=Wiffy Network Scanner
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wiffy
+ExecStart=/opt/wiffy/wiffy
+Restart=always
+RestartSec=10
+
+# Environment variables
+Environment="PORT=8080"
+Environment="WIFFY_DB_PATH=/var/lib/wiffy/wiffy.db"
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

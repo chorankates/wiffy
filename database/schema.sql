@@ -1,0 +1,27 @@
+-- Hosts table with hostname as the primary key
+CREATE TABLE IF NOT EXISTS hosts (
+    hostname TEXT PRIMARY KEY,
+    mac_address TEXT,
+    ip_address TEXT,
+    first_seen DATETIME NOT NULL,
+    last_seen DATETIME NOT NULL,
+    ports TEXT  -- JSON array of open ports from deep scans
+);
+
+-- Index for faster lookups by IP and MAC
+CREATE INDEX IF NOT EXISTS idx_ip_address ON hosts(ip_address);
+CREATE INDEX IF NOT EXISTS idx_mac_address ON hosts(mac_address);
+CREATE INDEX IF NOT EXISTS idx_last_seen ON hosts(last_seen);
+
+-- Scans table to track scan history
+CREATE TABLE IF NOT EXISTS scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_type TEXT NOT NULL,  -- 'quick' or 'deep'
+    target_range TEXT NOT NULL,
+    started_at DATETIME NOT NULL,
+    completed_at DATETIME,
+    status TEXT NOT NULL,  -- 'running', 'completed', 'failed'
+    hosts_found INTEGER DEFAULT 0,
+    error_message TEXT
+);
+
