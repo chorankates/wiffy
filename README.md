@@ -1,10 +1,10 @@
-# 📡 Wiffy
+# Wiffy
 
 > pretty sure it's pronounced 'wiffy', right?
 
 A modern network scanner with a beautiful web UI built in Go. Discover hosts on your network, track MAC addresses, hostnames, IP addresses, and monitor network activity over time.
 
-## ✨ Features
+## Features
 
 - **Quick Scans**: Fast network discovery using nmap ping scans
 - **Deep Scans**: Comprehensive scanning with port discovery
@@ -15,7 +15,7 @@ A modern network scanner with a beautiful web UI built in Go. Discover hosts on 
 - **Port Discovery**: Deep scans discover and track open ports
 - **Network History**: View all past scans and their results
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -58,7 +58,7 @@ make dev
 make clean
 ```
 
-## 📖 Usage
+## Usage
 
 1. **Start the server**:
    ```bash
@@ -76,7 +76,7 @@ make clean
 
 4. **View results** in real-time as they appear in the table
 
-## 🎯 API Endpoints
+## API Endpoints
 
 ### GET /api/hosts
 Get all discovered hosts
@@ -123,7 +123,7 @@ ws.onmessage = (event) => {
 };
 ```
 
-## 🗄️ Database Schema
+## Database Schema
 
 ### Hosts Table
 - `hostname` (TEXT, PRIMARY KEY) - Unique identifier
@@ -143,7 +143,7 @@ ws.onmessage = (event) => {
 - `hosts_found` (INTEGER) - Number of hosts discovered
 - `error_message` (TEXT) - Error details if failed
 
-## ⚙️ Configuration
+## Configuration
 
 Environment variables:
 
@@ -155,7 +155,7 @@ Example:
 PORT=3000 WIFFY_DB_PATH=/var/lib/wiffy.db ./wiffy
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 wiffy/
@@ -172,13 +172,13 @@ wiffy/
     └── app.js
 ```
 
-## 🔒 Security Notes
+## Security Notes
 
 - **Root Privileges**: Some nmap features (like OS detection) require root privileges. The scanner works fine without them for basic host discovery.
 - **Network Access**: This tool performs active network scanning. Make sure you have permission to scan the networks you target.
 - **Local Access**: By default, the web server listens on all interfaces. Consider firewall rules if running on a public network.
 
-## 🛠️ Development
+## Development
 
 ### Building
 
@@ -199,15 +199,15 @@ go test ./...
 - **api**: HTTP/WebSocket API handlers
 - **static**: Frontend HTML/CSS/JavaScript
 
-## 📝 License
+## License
 
 MIT License - feel free to use this project however you'd like!
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
-## 💡 Future Ideas
+## Future Ideas
 
 - [ ] Network topology visualization
 - [ ] Alert notifications for new hosts

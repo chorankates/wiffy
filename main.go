@@ -42,11 +42,10 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("🚀 Wiffy server starting on http://localhost%s\n", addr)
-	log.Printf("📊 Open your browser to http://localhost%s\n", addr)
+	log.Printf("Wiffy server starting on http://localhost%s\n", addr)
+	log.Printf("Open your browser to http://localhost%s\n", addr)
 
 	if err := http.ListenAndServe(addr, server); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
-

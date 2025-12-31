@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-## 🚀 Get Running in 60 Seconds
+## Get Running in 60 Seconds
 
 ### 1. Install nmap (if not already installed)
 
@@ -43,13 +43,13 @@ Navigate to: **http://localhost:8080**
 2. Click "Quick Scan" for fast discovery
 3. Watch the hosts appear in real-time!
 
-## 🎯 Common Network Ranges
+## Common Network Ranges
 
 - Home network: `192.168.1.0/24` or `192.168.0.0/24`
 - Corporate: `10.0.0.0/24` or `172.16.0.0/24`
 - Single IP: `192.168.1.100/32`
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### "nmap not found"
 Make sure nmap is installed and in your PATH:
@@ -70,7 +70,7 @@ Change the port:
 PORT=3000 ./wiffy
 ```
 
-## 📊 API Examples
+## API Examples
 
 **Start a quick scan:**
 ```bash
@@ -89,7 +89,7 @@ curl http://localhost:8080/api/hosts
 curl http://localhost:8080/api/stats
 ```
 
-## 🐳 Docker
+## Docker
 
 ```bash
 # Build and run with Docker
@@ -102,7 +102,7 @@ docker-compose logs -f
 docker-compose down
 ```
 
-## 💡 Tips
+## Tips
 
 - **Quick scans** are fast but only discover hosts
 - **Deep scans** take longer but find open ports
@@ -110,7 +110,7 @@ docker-compose down
 - Scans run in the background - you can start multiple scans
 - Real-time updates via WebSocket keep the UI fresh
 
-## 📝 Example Workflow
+## Example Workflow
 
 ```bash
 # 1. Start the server
@@ -126,7 +126,7 @@ docker-compose down
 ./examples/scan.sh stats
 ```
 
-## 🆘 Need Help?
+## Need Help?
 
 Check the full [README.md](README.md) for detailed documentation!
 
