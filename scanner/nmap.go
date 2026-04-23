@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -27,6 +28,29 @@ type ScanResult struct {
 
 func NewScanner(db *database.DB) *Scanner {
 	return &Scanner{db: db}
+}
+
+// hostsMatchingTargetRange returns hosts already stored with an IP address, optionally limited to those inside
+// targetRange when it is a CIDR. Empty targetRange selects all such hosts.
+func (s *Scanner) hostsMatchingTargetRange(targetRange string) ([]database.Host, error) {
+	hosts, err := s.db.GetHostsWithIPAddresses()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list hosts: %w", err)
+	}
+	if targetRange == "" {
+		return hosts, nil
+	}
+	_, ipNet, err := net.ParseCIDR(targetRange)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target_range (use CIDR like 192.168.1.0/24, or leave empty): %w", err)
+	}
+	var filtered []database.Host
+	for _, h := range hosts {
+		if ip := net.ParseIP(h.IPAddress); ip != nil && ipNet.Contains(ip) {
+			filtered = append(filtered, h)
+		}
+	}
+	return filtered, nil
 }
 
 // macScanExec runs nmap with the privileges needed for ARP-based MAC resolution.
@@ -148,23 +172,9 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 func (s *Scanner) MacScan(targetRange string, scanID int64, progressChan chan<- string) error {
 	progressChan <- "Starting MAC scan for known IP addresses..."
 
-	hosts, err := s.db.GetHostsWithIPAddresses()
+	hosts, err := s.hostsMatchingTargetRange(targetRange)
 	if err != nil {
-		return fmt.Errorf("failed to list hosts: %w", err)
-	}
-
-	if targetRange != "" {
-		_, ipNet, err := net.ParseCIDR(targetRange)
-		if err != nil {
-			return fmt.Errorf("invalid target_range for MAC scan (use CIDR like 192.168.1.0/24, or leave empty): %w", err)
-		}
-		var filtered []database.Host
-		for _, h := range hosts {
-			if ip := net.ParseIP(h.IPAddress); ip != nil && ipNet.Contains(ip) {
-				filtered = append(filtered, h)
-			}
-		}
-		hosts = filtered
+		return err
 	}
 
 	if len(hosts) == 0 {
@@ -270,17 +280,28 @@ func (s *Scanner) MacScan(targetRange string, scanID int64, progressChan chan<- 
 	return nil
 }
 
-// DeepScan performs a deep scan with port scanning
+// DeepScan performs a deep scan with port scanning for hosts already stored with an IP address.
+// targetRange may be empty (all such hosts) or a CIDR to limit which stored IPs are scanned (same rules as MacScan).
+// On Unix, nmap is run under sudo (see macScanExec) so ARP-derived MACs match MAC scan behavior and are trustworthy to persist.
 func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<- string) error {
 	progressChan <- "Starting deep scan with port discovery..."
 
-	// Use nmap with port scanning (-T4 for faster timing, -F for fast/common ports)
-	// Add -O for OS detection if running as root, but don't require it
-	args := []string{"-T4", "-F", "-sV", "-oG", "-", targetRange}
-	cmd := exec.Command("nmap", args...)
-	
-	// Show the actual command
-	cmdStr := fmt.Sprintf("$ nmap %s", strings.Join(args, " "))
+	hosts, err := s.hostsMatchingTargetRange(targetRange)
+	if err != nil {
+		return err
+	}
+	if len(hosts) == 0 {
+		progressChan <- "No known hosts with IP addresses match this scan."
+		s.db.UpdateScan(scanID, "completed", 0, "")
+		return nil
+	}
+
+	args := []string{"-T4", "-F", "-sV", "-oG", "-"}
+	for _, h := range hosts {
+		args = append(args, h.IPAddress)
+	}
+
+	cmd, cmdStr := macScanExec(args)
 	progressChan <- cmdStr
 
 	stdout, err := cmd.StdoutPipe()
@@ -326,11 +347,34 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 			progressChan <- fmt.Sprintf("[nmap] %s", line)
 		}
 
-		// Parse host information
+		// Greppable lines may be prefixed (e.g. UI timestamps); nmap data always includes "Host:".
+		if i := strings.Index(line, "Host:"); i >= 0 {
+			line = line[i:]
+		} else if line != "" {
+			continue
+		}
+
+		// Second greppable line for the same host: "Host: … Ports: …" without "Status: Up".
+		if strings.Contains(line, "Host:") && strings.Contains(line, "Ports:") &&
+			!strings.Contains(line, "Status: Up") {
+			if matches := hostRegex.FindStringSubmatch(line); len(matches) > 1 {
+				ip := matches[1]
+				if currentHost.IPAddress == ip {
+					if pm := portsRegex.FindStringSubmatch(line); len(pm) > 1 {
+						currentHost.Ports = parsePorts(pm[1])
+					}
+				}
+			}
+			continue
+		}
+
+		// Parse host information (line with Status: Up; ports may be here or on the following line)
 		if strings.Contains(line, "Host:") && strings.Contains(line, "Status: Up") {
 			// Save previous host if exists
 			if currentHost.IPAddress != "" {
-				s.saveHostResult(currentHost)
+				if err := s.saveHostResult(currentHost); err != nil {
+					return err
+				}
 				hostsFound++
 				progressChan <- fmt.Sprintf("Found: %s (%s) - %d open ports",
 					currentHost.Hostname, currentHost.IPAddress, len(currentHost.Ports))
@@ -352,7 +396,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 				currentHost.MacAddress = matches[1]
 			}
 
-			// Extract ports
+			// Extract ports when nmap puts them on the same line as status
 			if matches := portsRegex.FindStringSubmatch(line); len(matches) > 1 {
 				currentHost.Ports = parsePorts(matches[1])
 			}
@@ -361,7 +405,9 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 
 	// Save last host
 	if currentHost.IPAddress != "" {
-		s.saveHostResult(currentHost)
+		if err := s.saveHostResult(currentHost); err != nil {
+			return err
+		}
 		hostsFound++
 		progressChan <- fmt.Sprintf("Found: %s (%s) - %d open ports",
 			currentHost.Hostname, currentHost.IPAddress, len(currentHost.Ports))
@@ -385,10 +431,19 @@ func (s *Scanner) saveHostResult(result *ScanResult) error {
 		portsJSON = string(data)
 	}
 
+	macAddr := result.MacAddress
+	if existing, err := s.db.GetHost(result.Hostname); err == nil {
+		if macAddr == "" {
+			macAddr = existing.MacAddress
+		}
+	} else if err != sql.ErrNoRows {
+		return err
+	}
+
 	host := database.Host{
 		Hostname:   result.Hostname,
 		IPAddress:  result.IPAddress,
-		MacAddress: result.MacAddress,
+		MacAddress: macAddr,
 		LastSeen:   time.Now(),
 		Ports:      portsJSON,
 	}

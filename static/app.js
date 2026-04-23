@@ -252,7 +252,7 @@ async function startScan(scanType, targetRange) {
         }
         
         const result = await response.json();
-        const rangeLabel = targetRange.trim() || (scanType === 'mac' ? 'known hosts' : '(none)');
+        const rangeLabel = targetRange.trim() || (scanType === 'quick' ? '(none)' : 'known hosts');
         addActivityItem(`${scanType.toUpperCase()} scan on ${rangeLabel} (ID: ${result.scan_id})`, 'scan-started', 'STARTED');
         
         return result;
@@ -283,8 +283,8 @@ document.getElementById('scanForm').addEventListener('submit', async (e) => {
     const scanType = button.dataset.scanType;
     const targetRange = document.getElementById('targetRange').value.trim();
     
-    if (scanType !== 'mac' && !targetRange) {
-        alert('Target range is required for quick and deep scans.');
+    if (scanType === 'quick' && !targetRange) {
+        alert('Target range is required for quick scans.');
         return;
     }
     

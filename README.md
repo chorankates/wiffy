@@ -26,7 +26,7 @@ A modern network scanner with a beautiful web UI built in Go. Discover hosts on 
   - Windows: Download from [nmap.org](https://nmap.org/download.html)
 
 - for MAC scans to work, you'll need a sudoers entry like
-`<username> ALL=(root) NOPASSWD: /usr/bin/nmap`
+`<username> ALL=(root) NOPASSWD: /path/to/nmap`
 
 ### Installation
 

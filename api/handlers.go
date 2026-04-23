@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,7 +98,7 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 
 type ScanRequest struct {
 	ScanType    string `json:"scan_type"`    // "quick", "deep", or "mac"
-	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"; optional for "mac" (limits to CIDR; empty = all known IPs)
+	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"; required for "quick"; optional CIDR filter for "mac" and "deep" (same semantics: empty = all stored IPs; non-empty = limit to CIDR)
 }
 
 func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +113,13 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ScanType != "mac" && req.TargetRange == "" {
+	if req.ScanType == "quick" && req.TargetRange == "" {
 		http.Error(w, "target_range is required", http.StatusBadRequest)
 		return
 	}
 
 	displayRange := req.TargetRange
-	if req.ScanType == "mac" && displayRange == "" {
+	if (req.ScanType == "mac" || req.ScanType == "deep") && displayRange == "" {
 		displayRange = "known hosts"
 	}
 
@@ -213,25 +214,12 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSuggestRange(w http.ResponseWriter, r *http.Request) {
-	// Get client IP address
-	clientIP := r.RemoteAddr
-	
-	// Handle X-Forwarded-For if behind proxy
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		clientIP = forwarded
+	clientIP := extractClientIP(r)
+	suggestedRange := serverSuggestedSlash24()
+	if suggestedRange == "" {
+		suggestedRange = calculateNetwork24(clientIP)
 	}
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		clientIP = realIP
-	}
-	
-	// Remove port if present
-	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
-		clientIP = clientIP[:idx]
-	}
-	
-	// Calculate /24 network
-	suggestedRange := calculateNetwork24(clientIP)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"client_ip":       clientIP,
@@ -239,15 +227,120 @@ func (s *Server) handleSuggestRange(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func extractClientIP(r *http.Request) string {
+	clientIP := r.RemoteAddr
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		clientIP = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		clientIP = realIP
+	}
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		return host
+	}
+	return clientIP
+}
+
+// serverSuggestedSlash24 returns the server's IPv4 /24 on a non-loopback interface,
+// preferring RFC1918 addresses and skipping common virtual bridges.
+func serverSuggestedSlash24() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	var candidates []net.IP
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if isProbablyVirtualInterface(iface.Name) {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip4 := ipnet.IP.To4()
+			if ip4 == nil || !ip4.IsGlobalUnicast() {
+				continue
+			}
+			ipCopy := make(net.IP, 4)
+			copy(ipCopy, ip4)
+			candidates = append(candidates, ipCopy)
+		}
+	}
+	for _, ip := range candidates {
+		if isRFC1918(ip) {
+			return ipv4ToSlash24(ip)
+		}
+	}
+	if len(candidates) > 0 {
+		return ipv4ToSlash24(candidates[0])
+	}
+	return ""
+}
+
+func isRFC1918(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	switch {
+	case ip4[0] == 10:
+		return true
+	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+		return true
+	case ip4[0] == 192 && ip4[1] == 168:
+		return true
+	default:
+		return false
+	}
+}
+
+func ipv4ToSlash24(ip net.IP) string {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return ""
+	}
+	mask := net.CIDRMask(24, 32)
+	return fmt.Sprintf("%s/24", ip4.Mask(mask).String())
+}
+
 func calculateNetwork24(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed != nil {
+		if s := ipv4ToSlash24(parsed); s != "" {
+			return s
+		}
+	}
 	parts := strings.Split(ip, ".")
 	if len(parts) != 4 {
-		// Default for localhost or invalid IP
 		return "192.168.1.0/24"
 	}
-	
-	// Return first three octets with .0/24
 	return fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+}
+
+func isProbablyVirtualInterface(name string) bool {
+	n := strings.ToLower(name)
+	switch {
+	case n == "docker0":
+		return true
+	case strings.HasPrefix(n, "br-"):
+		return true
+	case strings.HasPrefix(n, "veth"):
+		return true
+	case strings.HasPrefix(n, "virbr"):
+		return true
+	case strings.HasPrefix(n, "vmnet"):
+		return true
+	default:
+		return false
+	}
 }
 
 // WebSocket handling
