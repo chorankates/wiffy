@@ -96,8 +96,8 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 }
 
 type ScanRequest struct {
-	ScanType    string `json:"scan_type"`    // "quick" or "deep"
-	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"
+	ScanType    string `json:"scan_type"`    // "quick", "deep", or "mac"
+	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"; optional for "mac" (limits to CIDR; empty = all known IPs)
 }
 
 func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
@@ -107,24 +107,29 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ScanType != "quick" && req.ScanType != "deep" {
-		http.Error(w, "scan_type must be 'quick' or 'deep'", http.StatusBadRequest)
+	if req.ScanType != "quick" && req.ScanType != "deep" && req.ScanType != "mac" {
+		http.Error(w, "scan_type must be 'quick', 'deep', or 'mac'", http.StatusBadRequest)
 		return
 	}
 
-	if req.TargetRange == "" {
+	if req.ScanType != "mac" && req.TargetRange == "" {
 		http.Error(w, "target_range is required", http.StatusBadRequest)
 		return
 	}
 
+	displayRange := req.TargetRange
+	if req.ScanType == "mac" && displayRange == "" {
+		displayRange = "known hosts"
+	}
+
 	// Create scan record
-	scanID, err := s.db.CreateScan(req.ScanType, req.TargetRange)
+	scanID, err := s.db.CreateScan(req.ScanType, displayRange)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Start scan in background
+	// Start scan in background (MAC scan uses raw target_range for optional CIDR filter)
 	go s.runScan(scanID, req.ScanType, req.TargetRange)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -149,10 +154,13 @@ func (s *Server) runScan(scanID int64, scanType, targetRange string) {
 	}()
 
 	var err error
-	if scanType == "quick" {
+	switch scanType {
+	case "quick":
 		err = s.scanner.QuickScan(targetRange, scanID, progressChan)
-	} else {
+	case "deep":
 		err = s.scanner.DeepScan(targetRange, scanID, progressChan)
+	case "mac":
+		err = s.scanner.MacScan(targetRange, scanID, progressChan)
 	}
 
 	close(progressChan)

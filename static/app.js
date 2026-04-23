@@ -252,7 +252,8 @@ async function startScan(scanType, targetRange) {
         }
         
         const result = await response.json();
-        addActivityItem(`${scanType.toUpperCase()} scan on ${targetRange} (ID: ${result.scan_id})`, 'scan-started', 'STARTED');
+        const rangeLabel = targetRange.trim() || (scanType === 'mac' ? 'known hosts' : '(none)');
+        addActivityItem(`${scanType.toUpperCase()} scan on ${rangeLabel} (ID: ${result.scan_id})`, 'scan-started', 'STARTED');
         
         return result;
     } catch (error) {
@@ -280,7 +281,12 @@ document.getElementById('scanForm').addEventListener('submit', async (e) => {
     
     const button = e.submitter;
     const scanType = button.dataset.scanType;
-    const targetRange = document.getElementById('targetRange').value;
+    const targetRange = document.getElementById('targetRange').value.trim();
+    
+    if (scanType !== 'mac' && !targetRange) {
+        alert('Target range is required for quick and deep scans.');
+        return;
+    }
     
     // Disable buttons during scan
     const buttons = document.querySelectorAll('#scanForm button');

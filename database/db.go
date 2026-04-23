@@ -119,6 +119,42 @@ func (db *DB) GetAllHosts() ([]Host, error) {
 	return hosts, rows.Err()
 }
 
+// GetHostsWithIPAddresses returns hosts that have a stored IP (for MAC resolution, etc.).
+func (db *DB) GetHostsWithIPAddresses() ([]Host, error) {
+	query := `SELECT hostname, mac_address, ip_address, first_seen, last_seen, ports 
+			  FROM hosts 
+			  WHERE ip_address IS NOT NULL AND TRIM(ip_address) != ''
+			  ORDER BY last_seen DESC`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var hosts []Host
+	for rows.Next() {
+		var h Host
+		var mac, ip, ports sql.NullString
+		err := rows.Scan(&h.Hostname, &mac, &ip, &h.FirstSeen, &h.LastSeen, &ports)
+		if err != nil {
+			return nil, err
+		}
+		if mac.Valid {
+			h.MacAddress = mac.String
+		}
+		if ip.Valid {
+			h.IPAddress = ip.String
+		}
+		if ports.Valid {
+			h.Ports = ports.String
+		}
+		hosts = append(hosts, h)
+	}
+
+	return hosts, rows.Err()
+}
+
 // GetHost retrieves a single host by hostname
 func (db *DB) GetHost(hostname string) (*Host, error) {
 	query := `SELECT hostname, mac_address, ip_address, first_seen, last_seen, ports 

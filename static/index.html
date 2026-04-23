@@ -580,8 +580,10 @@
                                 type="text" 
                                 id="targetRange" 
                                 placeholder="e.g., 192.168.1.0/24"
-                                required
                             >
+                            <p class="form-hint" style="margin-top: 6px; font-size: 0.85em; color: #666;">
+                                Required for quick/deep. For MAC scan, optional CIDR to limit which stored IPs are probed; leave empty for all known IPs.
+                            </p>
                         </div>
 
                         <div class="button-group">
@@ -590,6 +592,9 @@
                             </button>
                             <button type="submit" class="btn-secondary" data-scan-type="deep">
                                 Deep Scan
+                            </button>
+                            <button type="submit" class="btn-secondary" data-scan-type="mac">
+                                MAC Scan
                             </button>
                         </div>
                     </form>
