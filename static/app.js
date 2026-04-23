@@ -45,21 +45,43 @@ function updateConnectionStatus(connected) {
 
 function handleWebSocketMessage(data) {
     if (data.type === 'scan_progress') {
-        addActivityItem(data.message);
+        const msg = data.message;
+        // Detect console-style output
+        if (msg.startsWith('$') || msg.startsWith('[nmap]') || msg.startsWith('[stderr]')) {
+            addConsoleOutput(msg);
+        } else {
+            addActivityItem(msg, 'scan-progress');
+        }
     } else if (data.type === 'scan_complete') {
-        addActivityItem(`Scan completed: ${data.status}`);
+        const status = data.status === 'completed' ? 'scan-completed' : 'scan-failed';
+        const statusText = data.status === 'completed' ? 'COMPLETED' : 'FAILED';
+        addActivityItem(`Scan ${statusText}: ${data.error || 'Successfully finished'}`, status, statusText);
         refreshAll();
+    } else if (data.type === 'scan_started') {
+        addActivityItem(data.message, 'scan-started', 'STARTED');
     } else if (data.type === 'connected') {
-        addActivityItem(data.message);
+        addActivityItem(data.message, 'info');
     }
 }
 
-function addActivityItem(message) {
+function addActivityItem(message, type = 'info', statusLabel = null) {
     const feed = document.getElementById('activityFeed');
     const item = document.createElement('div');
-    item.className = 'activity-item';
+    item.className = `activity-item ${type}`;
+    
     const timestamp = new Date().toLocaleTimeString();
-    item.textContent = `[${timestamp}] ${message}`;
+    
+    let content = `<span class="activity-timestamp">${timestamp}</span>`;
+    
+    if (statusLabel) {
+        const statusClass = statusLabel === 'STARTED' ? 'status-running' :
+                          statusLabel === 'COMPLETED' ? 'status-complete' :
+                          statusLabel === 'FAILED' ? 'status-error' : '';
+        content += `<span class="activity-status ${statusClass}">${statusLabel}</span>`;
+    }
+    
+    content += message;
+    item.innerHTML = content;
     
     // Remove "waiting" message if exists
     if (feed.children.length === 1 && feed.children[0].textContent.includes('Waiting')) {
@@ -71,6 +93,47 @@ function addActivityItem(message) {
     // Keep only last 50 items
     while (feed.children.length > 50) {
         feed.removeChild(feed.lastChild);
+    }
+}
+
+function addConsoleOutput(message) {
+    const console = document.getElementById('consoleOutput');
+    const line = document.createElement('div');
+    
+    const timestamp = new Date().toLocaleTimeString();
+    
+    // Determine line type and styling
+    let lineClass = 'console-line';
+    let displayMessage = message;
+    
+    if (message.startsWith('$')) {
+        lineClass += ' command';
+    } else if (message.startsWith('[nmap]')) {
+        lineClass += ' nmap';
+        displayMessage = message.substring(7); // Remove [nmap] prefix
+    } else if (message.startsWith('[stderr]')) {
+        lineClass += ' error';
+        displayMessage = message.substring(9); // Remove [stderr] prefix
+    } else if (message.includes('complete') || message.includes('Found')) {
+        lineClass += ' success';
+    }
+    
+    line.className = lineClass;
+    line.innerHTML = `<span class="console-timestamp">${timestamp}</span>${escapeHtml(displayMessage)}`;
+    
+    // Remove "ready" message if exists
+    if (console.children.length === 1 && console.children[0].textContent.includes('Ready')) {
+        console.innerHTML = '';
+    }
+    
+    console.appendChild(line);
+    
+    // Auto-scroll to bottom
+    console.scrollTop = console.scrollHeight;
+    
+    // Keep only last 200 lines
+    while (console.children.length > 200) {
+        console.removeChild(console.firstChild);
     }
 }
 
@@ -115,7 +178,7 @@ async function fetchHosts() {
                               lastSeen.toLocaleDateString();
             
             return `
-                <tr>
+                <tr onclick="showHostDetail('${escapeHtml(host.hostname)}')">
                     <td><strong>${escapeHtml(host.hostname)}</strong></td>
                     <td>${escapeHtml(host.ip_address || '-')}</td>
                     <td><code>${escapeHtml(host.mac_address || '-')}</code></td>
@@ -189,7 +252,7 @@ async function startScan(scanType, targetRange) {
         }
         
         const result = await response.json();
-        addActivityItem(`Started ${scanType} scan on ${targetRange} (ID: ${result.scan_id})`);
+        addActivityItem(`${scanType.toUpperCase()} scan on ${targetRange} (ID: ${result.scan_id})`, 'scan-started', 'STARTED');
         
         return result;
     } catch (error) {
@@ -229,10 +292,98 @@ document.getElementById('scanForm').addEventListener('submit', async (e) => {
     buttons.forEach(btn => btn.disabled = false);
 });
 
+// Load suggested network range
+async function loadSuggestedRange() {
+    try {
+        const response = await fetch('/api/suggest-range');
+        const data = await response.json();
+        document.getElementById('targetRange').placeholder = data.suggested_range;
+        document.getElementById('targetRange').value = data.suggested_range;
+    } catch (error) {
+        console.error('Error loading suggested range:', error);
+    }
+}
+
 // Initialize
 connectWebSocket();
 refreshAll();
+loadSuggestedRange();
 
 // Refresh data every 5 seconds
 setInterval(refreshAll, 5000);
+
+// Host detail modal functions
+async function showHostDetail(hostname) {
+    try {
+        const response = await fetch(`/api/hosts/${encodeURIComponent(hostname)}`);
+        if (!response.ok) {
+            throw new Error('Host not found');
+        }
+        
+        const host = await response.json();
+        
+        // Populate modal
+        document.getElementById('modalHostname').textContent = host.hostname;
+        document.getElementById('detailHostname').textContent = host.hostname || '-';
+        
+        const ipEl = document.getElementById('detailIP');
+        ipEl.textContent = host.ip_address || 'Not available';
+        ipEl.className = host.ip_address ? 'detail-value' : 'detail-value empty';
+        
+        const macEl = document.getElementById('detailMAC');
+        macEl.textContent = host.mac_address || 'Not available';
+        macEl.className = host.mac_address ? 'detail-value' : 'detail-value empty';
+        
+        const firstSeen = new Date(host.first_seen);
+        document.getElementById('detailFirstSeen').textContent = 
+            firstSeen.toLocaleString();
+        
+        const lastSeen = new Date(host.last_seen);
+        const hoursSince = (Date.now() - lastSeen.getTime()) / (1000 * 60 * 60);
+        const lastSeenText = hoursSince < 1 ? 'Just now' :
+                            hoursSince < 24 ? `${Math.floor(hoursSince)} hours ago` :
+                            `${Math.floor(hoursSince / 24)} days ago`;
+        document.getElementById('detailLastSeen').textContent = 
+            `${lastSeen.toLocaleString()} (${lastSeenText})`;
+        
+        // Ports
+        const portsContainer = document.getElementById('detailPorts');
+        if (host.ports) {
+            const ports = JSON.parse(host.ports);
+            if (ports.length > 0) {
+                portsContainer.innerHTML = ports
+                    .map(p => `<span class="port-badge">${p}</span>`)
+                    .join('');
+            } else {
+                portsContainer.innerHTML = '<div class="detail-value empty">No open ports discovered</div>';
+            }
+        } else {
+            portsContainer.innerHTML = '<div class="detail-value empty">No port scan performed</div>';
+        }
+        
+        // Show modal
+        document.getElementById('hostModal').classList.add('active');
+    } catch (error) {
+        console.error('Error loading host details:', error);
+        alert('Failed to load host details');
+    }
+}
+
+function closeHostModal() {
+    document.getElementById('hostModal').classList.remove('active');
+}
+
+// Close modal when clicking outside
+document.getElementById('hostModal').addEventListener('click', (e) => {
+    if (e.target.id === 'hostModal') {
+        closeHostModal();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeHostModal();
+    }
+});
 

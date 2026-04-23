@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
@@ -21,7 +22,13 @@ type Server struct {
 
 	// WebSocket connections for scan progress
 	wsConnsMux sync.RWMutex
-	wsConns    map[*websocket.Conn]bool
+	wsConns    map[*websocket.Conn]*wsClient
+}
+
+type wsClient struct {
+	conn      *websocket.Conn
+	writeMux  sync.Mutex
+	writeChan chan interface{}
 }
 
 var upgrader = websocket.Upgrader{
@@ -35,7 +42,7 @@ func NewServer(db *database.DB) *Server {
 		db:      db,
 		scanner: scanner.NewScanner(db),
 		router:  mux.NewRouter(),
-		wsConns: make(map[*websocket.Conn]bool),
+		wsConns: make(map[*websocket.Conn]*wsClient),
 	}
 
 	s.setupRoutes()
@@ -50,6 +57,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/scans", s.handleStartScan).Methods("POST")
 	api.HandleFunc("/scans", s.handleGetScans).Methods("GET")
 	api.HandleFunc("/stats", s.handleGetStats).Methods("GET")
+	api.HandleFunc("/suggest-range", s.handleSuggestRange).Methods("GET")
 	api.HandleFunc("/ws", s.handleWebSocket)
 
 	// Serve static files and frontend
@@ -196,6 +204,44 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
+func (s *Server) handleSuggestRange(w http.ResponseWriter, r *http.Request) {
+	// Get client IP address
+	clientIP := r.RemoteAddr
+	
+	// Handle X-Forwarded-For if behind proxy
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		clientIP = forwarded
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		clientIP = realIP
+	}
+	
+	// Remove port if present
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+	
+	// Calculate /24 network
+	suggestedRange := calculateNetwork24(clientIP)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"client_ip":       clientIP,
+		"suggested_range": suggestedRange,
+	})
+}
+
+func calculateNetwork24(ip string) string {
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		// Default for localhost or invalid IP
+		return "192.168.1.0/24"
+	}
+	
+	// Return first three octets with .0/24
+	return fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+}
+
 // WebSocket handling
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -205,21 +251,30 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := &wsClient{
+		conn:      conn,
+		writeChan: make(chan interface{}, 100),
+	}
+
 	s.wsConnsMux.Lock()
-	s.wsConns[conn] = true
+	s.wsConns[conn] = client
 	s.wsConnsMux.Unlock()
 
+	// Start write pump for this client
+	go s.writePump(client)
+
 	// Send welcome message
-	conn.WriteJSON(map[string]string{
+	client.writeChan <- map[string]string{
 		"type":    "connected",
 		"message": "Connected to Wiffy scanner",
-	})
+	}
 
 	// Keep connection alive and handle disconnect
 	defer func() {
 		s.wsConnsMux.Lock()
 		delete(s.wsConns, conn)
 		s.wsConnsMux.Unlock()
+		close(client.writeChan)
 		conn.Close()
 	}()
 
@@ -231,14 +286,29 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) writePump(client *wsClient) {
+	for msg := range client.writeChan {
+		client.writeMux.Lock()
+		err := client.conn.WriteJSON(msg)
+		client.writeMux.Unlock()
+		
+		if err != nil {
+			// Connection probably closed, stop writing
+			return
+		}
+	}
+}
+
 func (s *Server) broadcastMessage(msg interface{}) {
 	s.wsConnsMux.RLock()
 	defer s.wsConnsMux.RUnlock()
 
-	for conn := range s.wsConns {
-		if err := conn.WriteJSON(msg); err != nil {
-			// Connection probably closed, will be cleaned up
-			continue
+	for _, client := range s.wsConns {
+		select {
+		case client.writeChan <- msg:
+			// Message queued successfully
+		default:
+			// Channel full, skip this message for this client
 		}
 	}
 }

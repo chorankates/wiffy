@@ -32,16 +32,37 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 	progressChan <- "Starting quick scan..."
 
 	// Use nmap with -sn (ping scan, no port scan) for quick discovery
-	cmd := exec.Command("nmap", "-sn", "-oG", "-", targetRange)
+	args := []string{"-sn", "-oG", "-", targetRange}
+	cmd := exec.Command("nmap", args...)
+	
+	// Show the actual command
+	cmdStr := fmt.Sprintf("$ nmap %s", strings.Join(args, " "))
+	progressChan <- cmdStr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nmap: %w", err)
 	}
+	
+	// Read stderr in background
+	go func() {
+		stderrScanner := bufio.NewScanner(stderr)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			if line != "" {
+				progressChan <- fmt.Sprintf("[stderr] %s", line)
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(stdout)
 	hostsFound := 0
@@ -52,6 +73,11 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		
+		// Show raw output for debugging
+		if line != "" {
+			progressChan <- fmt.Sprintf("[nmap] %s", line)
+		}
 
 		// Parse host information
 		if strings.Contains(line, "Host:") && strings.Contains(line, "Status: Up") {
@@ -105,16 +131,37 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 
 	// Use nmap with port scanning (-T4 for faster timing, -F for fast/common ports)
 	// Add -O for OS detection if running as root, but don't require it
-	cmd := exec.Command("nmap", "-T4", "-F", "-sV", "-oG", "-", targetRange)
+	args := []string{"-T4", "-F", "-sV", "-oG", "-", targetRange}
+	cmd := exec.Command("nmap", args...)
+	
+	// Show the actual command
+	cmdStr := fmt.Sprintf("$ nmap %s", strings.Join(args, " "))
+	progressChan <- cmdStr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nmap: %w", err)
 	}
+	
+	// Read stderr in background
+	go func() {
+		stderrScanner := bufio.NewScanner(stderr)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			if line != "" {
+				progressChan <- fmt.Sprintf("[stderr] %s", line)
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(stdout)
 	hostsFound := 0
@@ -128,6 +175,11 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		
+		// Show raw output for debugging
+		if line != "" {
+			progressChan <- fmt.Sprintf("[nmap] %s", line)
+		}
 
 		// Parse host information
 		if strings.Contains(line, "Host:") && strings.Contains(line, "Status: Up") {
