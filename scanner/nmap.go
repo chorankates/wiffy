@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,11 +20,19 @@ type Scanner struct {
 	db *database.DB
 }
 
+// PortEntry is one open port from nmap greppable output (-oG), including service detection (-sV).
+type PortEntry struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
+	Service  string `json:"service,omitempty"`
+	Product  string `json:"product,omitempty"`
+}
+
 type ScanResult struct {
 	Hostname   string
 	IPAddress  string
 	MacAddress string
-	Ports      []int
+	Ports      []PortEntry
 }
 
 func NewScanner(db *database.DB) *Scanner {
@@ -361,7 +370,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 				ip := matches[1]
 				if currentHost.IPAddress == ip {
 					if pm := portsRegex.FindStringSubmatch(line); len(pm) > 1 {
-						currentHost.Ports = parsePorts(pm[1])
+						currentHost.Ports = parsePortEntries(pm[1])
 					}
 				}
 			}
@@ -398,7 +407,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 
 			// Extract ports when nmap puts them on the same line as status
 			if matches := portsRegex.FindStringSubmatch(line); len(matches) > 1 {
-				currentHost.Ports = parsePorts(matches[1])
+				currentHost.Ports = parsePortEntries(matches[1])
 			}
 		}
 	}
@@ -451,24 +460,51 @@ func (s *Scanner) saveHostResult(result *ScanResult) error {
 	return s.db.UpsertHost(host)
 }
 
-// parsePorts extracts port numbers from nmap greppable output
-// Format: "22/open/tcp//ssh///, 80/open/tcp//http///"
-func parsePorts(portsStr string) []int {
-	var ports []int
-	portEntries := strings.Split(portsStr, ",")
-
-	for _, entry := range portEntries {
+// parsePortEntries parses nmap greppable "Ports:" field entries.
+// Each entry looks like: port/state/protocol/owner/service/rpcinfo/version
+// (see https://nmap.org/book/output-formats-grepable.html). Only "open" ports are kept.
+func parsePortEntries(portsStr string) []PortEntry {
+	var out []PortEntry
+	for _, entry := range strings.Split(portsStr, ",") {
 		entry = strings.TrimSpace(entry)
-		parts := strings.Split(entry, "/")
-		if len(parts) > 0 {
-			var port int
-			if _, err := fmt.Sscanf(parts[0], "%d", &port); err == nil {
-				ports = append(ports, port)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, "/", 7)
+		if len(parts) < 3 {
+			continue
+		}
+		port, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		if !strings.EqualFold(parts[1], "open") {
+			continue
+		}
+		proto := parts[2]
+		service := ""
+		if len(parts) > 4 {
+			service = parts[4]
+		}
+		product := ""
+		if len(parts) > 5 && parts[5] != "" {
+			product = parts[5]
+		}
+		if len(parts) > 6 && parts[6] != "" {
+			if product != "" {
+				product = product + " · " + parts[6]
+			} else {
+				product = parts[6]
 			}
 		}
+		out = append(out, PortEntry{
+			Port:     port,
+			Protocol: proto,
+			Service:  service,
+			Product:  product,
+		})
 	}
-
-	return ports
+	return out
 }
 
 // ValidateNmap checks if nmap is installed

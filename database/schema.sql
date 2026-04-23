@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS hosts (
     ip_address TEXT,
     first_seen DATETIME NOT NULL,
     last_seen DATETIME NOT NULL,
-    ports TEXT  -- JSON array of open ports from deep scans
+    ports TEXT  -- JSON array: [{"port":80,"protocol":"tcp","service":"http","product":"nginx"}, ...] or legacy [80,443]
 );
 
 -- Index for faster lookups by IP and MAC

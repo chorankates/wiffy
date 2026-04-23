@@ -164,11 +164,8 @@ async function fetchHosts() {
         }
         
         tbody.innerHTML = hosts.map(host => {
-            const ports = host.ports ? JSON.parse(host.ports) : [];
-            const portsBadges = ports.length > 0 
-                ? ports.slice(0, 10).map(p => `<span class="port-badge">${p}</span>`).join('') 
-                    + (ports.length > 10 ? ` <span class="port-badge">+${ports.length - 10} more</span>` : '')
-                : '-';
+            const ports = parsePortsField(host.ports);
+            const portsBadges = renderHostTablePortBadges(ports);
             
             const lastSeen = new Date(host.last_seen);
             const hoursSince = (Date.now() - lastSeen.getTime()) / (1000 * 60 * 60);
@@ -269,6 +266,76 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/** @returns {{ port: number, protocol: string, service: string, product: string }[]} */
+function normalizePorts(parsed) {
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+        return [];
+    }
+    if (typeof parsed[0] === 'number') {
+        return parsed.map((port) => ({
+            port,
+            protocol: '',
+            service: '',
+            product: '',
+        }));
+    }
+    return parsed.map((p) => ({
+        port: Number(p.port),
+        protocol: p.protocol || '',
+        service: p.service || '',
+        product: p.product || '',
+    }));
+}
+
+function parsePortsField(portsJson) {
+    if (!portsJson) {
+        return [];
+    }
+    try {
+        return normalizePorts(JSON.parse(portsJson));
+    } catch {
+        return [];
+    }
+}
+
+function portBadgeLabel(p) {
+    if (p.protocol) {
+        return `${p.port}/${p.protocol}`;
+    }
+    return String(p.port);
+}
+
+function renderHostTablePortBadges(ports) {
+    if (ports.length === 0) {
+        return '-';
+    }
+    const slice = ports.slice(0, 10);
+    const badges = slice.map((p) => `<span class="port-badge">${escapeHtml(portBadgeLabel(p))}</span>`).join('');
+    const more = ports.length > 10 ? ` <span class="port-badge">+${ports.length - 10} more</span>` : '';
+    return badges + more;
+}
+
+function renderModalPortRows(ports) {
+    return ports
+        .map((p) => {
+            const badge = escapeHtml(portBadgeLabel(p));
+            const hasMeta = p.service || p.product;
+            if (!hasMeta) {
+                return `<div class="port-detail-row"><span class="port-badge">${badge}</span></div>`;
+            }
+            let inner = '<div class="port-detail-meta">';
+            if (p.service) {
+                inner += `<div class="port-detail-service">${escapeHtml(p.service)}</div>`;
+            }
+            if (p.product) {
+                inner += `<div class="port-detail-product">${escapeHtml(p.product)}</div>`;
+            }
+            inner += '</div>';
+            return `<div class="port-detail-row"><span class="port-badge">${badge}</span>${inner}</div>`;
+        })
+        .join('');
+}
+
 function refreshAll() {
     fetchStats();
     fetchHosts();
@@ -355,11 +422,9 @@ async function showHostDetail(hostname) {
         // Ports
         const portsContainer = document.getElementById('detailPorts');
         if (host.ports) {
-            const ports = JSON.parse(host.ports);
+            const ports = parsePortsField(host.ports);
             if (ports.length > 0) {
-                portsContainer.innerHTML = ports
-                    .map(p => `<span class="port-badge">${p}</span>`)
-                    .join('');
+                portsContainer.innerHTML = renderModalPortRows(ports);
             } else {
                 portsContainer.innerHTML = '<div class="detail-value empty">No open ports discovered</div>';
             }

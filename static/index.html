@@ -506,10 +506,46 @@
         }
 
         .ports-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-            gap: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
             margin-top: 10px;
+        }
+
+        .port-detail-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 12px;
+            background: #f9f9f9;
+            border-radius: 6px;
+            border: 1px solid #e8e8e8;
+        }
+
+        .port-detail-row .port-badge {
+            flex-shrink: 0;
+            margin: 0;
+        }
+
+        .port-detail-meta {
+            flex: 1;
+            min-width: 0;
+            font-family: inherit;
+        }
+
+        .port-detail-service {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95em;
+            word-break: break-word;
+        }
+
+        .port-detail-product {
+            margin-top: 4px;
+            font-size: 0.88em;
+            color: #555;
+            line-height: 1.35;
+            word-break: break-word;
         }
 
         .hosts-table tbody tr {
