@@ -8,7 +8,6 @@ import (
 	"net"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -39,9 +38,10 @@ func NewScanner(db *database.DB) *Scanner {
 	return &Scanner{db: db}
 }
 
-// hostsMatchingTargetRange returns hosts already stored with an IP address, optionally limited to those inside
-// targetRange when it is a CIDR. Empty targetRange selects all such hosts.
+// hostsMatchingTargetRange returns hosts already stored with an IP address. Empty targetRange selects all such
+// hosts. A bare IP limits to that exact address only. A CIDR limits to hosts inside that network.
 func (s *Scanner) hostsMatchingTargetRange(targetRange string) ([]database.Host, error) {
+	targetRange = strings.TrimSpace(targetRange)
 	hosts, err := s.db.GetHostsWithIPAddresses()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list hosts: %w", err)
@@ -49,9 +49,21 @@ func (s *Scanner) hostsMatchingTargetRange(targetRange string) ([]database.Host,
 	if targetRange == "" {
 		return hosts, nil
 	}
+	// Single IP: exact match only (do not infer a subnet or require /32).
+	if !strings.Contains(targetRange, "/") {
+		if want := net.ParseIP(targetRange); want != nil {
+			var filtered []database.Host
+			for _, h := range hosts {
+				if ip := net.ParseIP(h.IPAddress); ip != nil && ip.Equal(want) {
+					filtered = append(filtered, h)
+				}
+			}
+			return filtered, nil
+		}
+	}
 	_, ipNet, err := net.ParseCIDR(targetRange)
 	if err != nil {
-		return nil, fmt.Errorf("invalid target_range (use CIDR like 192.168.1.0/24, or leave empty): %w", err)
+		return nil, fmt.Errorf("invalid target_range (single IP, CIDR like 192.168.1.0/24, or leave empty): %w", err)
 	}
 	var filtered []database.Host
 	for _, h := range hosts {
@@ -63,14 +75,8 @@ func (s *Scanner) hostsMatchingTargetRange(targetRange string) ([]database.Host,
 }
 
 // macScanExec runs nmap with the privileges needed for ARP-based MAC resolution.
-// On Unix, nmap is invoked via sudo; configure sudoers for passwordless nmap (exact path), e.g.:
-//
-//	youruser ALL=(root) NOPASSWD: /usr/bin/nmap
+// nmap is invoked via sudo; configure sudoers for passwordless nmap (exact path), e.g.:
 func macScanExec(nmapArgs []string) (*exec.Cmd, string) {
-	if runtime.GOOS == "windows" {
-		return exec.Command("nmap", nmapArgs...),
-			fmt.Sprintf("$ nmap %s", strings.Join(nmapArgs, " "))
-	}
 	cmdArgs := append([]string{"nmap"}, nmapArgs...)
 	return exec.Command("sudo", cmdArgs...),
 		fmt.Sprintf("$ sudo nmap %s", strings.Join(nmapArgs, " "))
@@ -153,7 +159,7 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 	// Use nmap with -sn (ping scan, no port scan) for quick discovery
 	args := []string{"-sn", "-oG", "-", targetRange}
 	cmd := exec.Command("nmap", args...)
-	
+
 	// Show the actual command
 	cmdStr := fmt.Sprintf("$ nmap %s", strings.Join(args, " "))
 	progressChan <- cmdStr
@@ -162,7 +168,7 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -171,7 +177,7 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nmap: %w", err)
 	}
-	
+
 	// Read stderr in background
 	go func() {
 		stderrScanner := bufio.NewScanner(stderr)
@@ -192,7 +198,7 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Show raw output for debugging
 		if line != "" {
 			progressChan <- fmt.Sprintf("[nmap] %s", line)
@@ -237,7 +243,8 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 }
 
 // MacScan resolves MAC addresses for hosts already stored with an IP address.
-// targetRange may be empty (all known hosts) or a CIDR such as 192.168.1.0/24 to limit which stored IPs are probed.
+// targetRange may be empty (all known hosts), a single IP to probe only that stored address, or a CIDR to limit
+// which stored IPs are probed.
 //
 // On Unix, nmap is run under sudo so only that process is privileged; sudoers should allow NOPASSWD for nmap.
 func (s *Scanner) MacScan(targetRange string, scanID int64, progressChan chan<- string) error {
@@ -394,7 +401,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -403,7 +410,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start nmap: %w", err)
 	}
-	
+
 	// Read stderr in background
 	go func() {
 		stderrScanner := bufio.NewScanner(stderr)
@@ -427,7 +434,7 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Show raw output for debugging
 		if line != "" {
 			progressChan <- fmt.Sprintf("[nmap] %s", line)
@@ -618,4 +625,3 @@ func ValidateNmap() error {
 	}
 	return nil
 }
-
