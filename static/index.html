@@ -555,6 +555,45 @@
         .hosts-table tbody tr:hover {
             background: #f0f2ff !important;
         }
+
+        .detail-name-edit input.detail-display-input {
+            width: 100%;
+            font-family: inherit;
+        }
+
+        .detail-hint {
+            font-size: 0.85em;
+            color: #888;
+            line-height: 1.35;
+        }
+
+        .display-name-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-save-name {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 5px;
+            font-size: 0.95em;
+            font-weight: 600;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            transition: background 0.2s;
+        }
+
+        .btn-save-name:hover:not(:disabled) {
+            background: #5568d3;
+        }
+
+        .btn-save-name:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -590,7 +629,7 @@
                     <table class="hosts-table" id="hostsTable">
                         <thead>
                             <tr>
-                                <th>Hostname</th>
+                                <th>Name</th>
                                 <th>IP Address</th>
                                 <th>MAC Address</th>
                                 <th>Open Ports</th>
@@ -665,9 +704,13 @@
                 <button class="modal-close" onclick="closeHostModal()">&times;</button>
             </div>
             
-            <div class="detail-row">
-                <div class="detail-label">Hostname</div>
-                <div class="detail-value" id="detailHostname">-</div>
+            <div class="detail-row detail-name-edit">
+                <div class="detail-label">Name</div>
+                <input type="text" class="detail-display-input" id="detailDisplayName" maxlength="256" autocomplete="off" placeholder="Label this device" />
+                <div class="detail-hint" id="detailNameHint"></div>
+                <div class="display-name-actions">
+                    <button type="button" class="btn-save-name" id="saveDisplayNameBtn">Save name</button>
+                </div>
             </div>
             
             <div class="detail-row">

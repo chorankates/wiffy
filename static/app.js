@@ -2,6 +2,19 @@
 let ws = null;
 let reconnectInterval = null;
 
+/** Host object from API while the detail modal is open */
+let modalHost = null;
+
+function effectiveDisplayName(host) {
+    if (!host) {
+        return '';
+    }
+    if (host.display_name && String(host.display_name).trim() !== '') {
+        return host.display_name;
+    }
+    return host.hostname || '';
+}
+
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
@@ -174,9 +187,10 @@ async function fetchHosts() {
                               hoursSince < 24 ? `${Math.floor(hoursSince)}h ago` : 
                               lastSeen.toLocaleDateString();
             
+            const displayName = effectiveDisplayName(host);
             return `
                 <tr onclick="showHostDetail('${escapeHtml(host.hostname)}')">
-                    <td><strong>${escapeHtml(host.hostname)}</strong></td>
+                    <td><strong>${escapeHtml(displayName)}</strong></td>
                     <td>${escapeHtml(host.ip_address || '-')}</td>
                     <td><code>${escapeHtml(host.mac_address || '-')}</code></td>
                     <td>${portsBadges}</td>
@@ -394,10 +408,22 @@ async function showHostDetail(hostname) {
         }
         
         const host = await response.json();
-        
-        // Populate modal
-        document.getElementById('modalHostname').textContent = host.hostname;
-        document.getElementById('detailHostname').textContent = host.hostname || '-';
+        modalHost = host;
+
+        const nameInput = document.getElementById('detailDisplayName');
+        const saveBtn = document.getElementById('saveDisplayNameBtn');
+        const hintEl = document.getElementById('detailNameHint');
+        const hasMac = !!(host.mac_address && String(host.mac_address).trim() !== '');
+
+        document.getElementById('modalHostname').textContent = effectiveDisplayName(host) || 'Host details';
+        nameInput.value = effectiveDisplayName(host) || '';
+        if (hasMac) {
+            hintEl.textContent = `From scan: ${host.hostname || '—'}`;
+        } else {
+            hintEl.textContent = 'Run a MAC scan to set a custom name. Names are saved per MAC address.';
+        }
+        nameInput.disabled = !hasMac;
+        saveBtn.disabled = !hasMac;
         
         const ipEl = document.getElementById('detailIP');
         ipEl.textContent = host.ip_address || 'Not available';
@@ -441,7 +467,38 @@ async function showHostDetail(hostname) {
 }
 
 function closeHostModal() {
+    modalHost = null;
     document.getElementById('hostModal').classList.remove('active');
+}
+
+async function saveHostDisplayName() {
+    if (!modalHost || !modalHost.mac_address || !String(modalHost.mac_address).trim()) {
+        return;
+    }
+    const input = document.getElementById('detailDisplayName');
+    const raw = input.value.trim();
+    const scanned = modalHost.hostname || '';
+    const label = raw === '' || raw === scanned ? '' : raw;
+
+    try {
+        const res = await fetch('/api/host-labels', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mac_address: modalHost.mac_address,
+                label,
+            }),
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || res.statusText);
+        }
+        await showHostDetail(modalHost.hostname);
+        fetchHosts();
+    } catch (err) {
+        console.error('Error saving name:', err);
+        alert(`Failed to save name: ${err.message}`);
+    }
 }
 
 // Close modal when clicking outside
@@ -455,6 +512,15 @@ document.getElementById('hostModal').addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeHostModal();
+    }
+});
+
+document.getElementById('saveDisplayNameBtn').addEventListener('click', saveHostDisplayName);
+
+document.getElementById('detailDisplayName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        saveHostDisplayName();
     }
 });
 

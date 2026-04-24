@@ -55,6 +55,7 @@ func (s *Server) setupRoutes() {
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/hosts", s.handleGetHosts).Methods("GET")
 	api.HandleFunc("/hosts/{hostname}", s.handleGetHost).Methods("GET")
+	api.HandleFunc("/host-labels", s.handlePutHostLabel).Methods("PUT")
 	api.HandleFunc("/scans", s.handleStartScan).Methods("POST")
 	api.HandleFunc("/scans", s.handleGetScans).Methods("GET")
 	api.HandleFunc("/stats", s.handleGetStats).Methods("GET")
@@ -80,6 +81,48 @@ func (s *Server) handleGetHosts(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(hosts)
+}
+
+const maxHostLabelLen = 256
+
+type hostLabelRequest struct {
+	MACAddress string `json:"mac_address"`
+	Label      string `json:"label"`
+}
+
+func (s *Server) handlePutHostLabel(w http.ResponseWriter, r *http.Request) {
+	var req hostLabelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	mac := strings.TrimSpace(req.MACAddress)
+	if _, err := net.ParseMAC(mac); err != nil {
+		http.Error(w, "invalid mac_address", http.StatusBadRequest)
+		return
+	}
+	key := database.NormalizeMACKey(mac)
+	if key == "" {
+		http.Error(w, "invalid mac_address", http.StatusBadRequest)
+		return
+	}
+	label := strings.TrimSpace(req.Label)
+	if label == "" {
+		if err := s.db.DeleteHostLabel(key); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if len(label) > maxHostLabelLen {
+			http.Error(w, fmt.Sprintf("label too long (max %d characters)", maxHostLabelLen), http.StatusBadRequest)
+			return
+		}
+		if err := s.db.UpsertHostLabel(key, label); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -17,12 +19,26 @@ type DB struct {
 }
 
 type Host struct {
-	Hostname   string    `json:"hostname"`
-	MacAddress string    `json:"mac_address,omitempty"`
-	IPAddress  string    `json:"ip_address,omitempty"`
-	FirstSeen  time.Time `json:"first_seen"`
-	LastSeen   time.Time `json:"last_seen"`
-	Ports      string    `json:"ports,omitempty"` // JSON array
+	Hostname    string    `json:"hostname"`
+	DisplayName string    `json:"display_name,omitempty"` // user label for this MAC; UI prefers over Hostname
+	MacAddress  string    `json:"mac_address,omitempty"`
+	IPAddress   string    `json:"ip_address,omitempty"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+	Ports       string    `json:"ports,omitempty"` // JSON array
+}
+
+// NormalizeMACKey returns canonical uppercase MAC for DB keys and lookups, or "" if invalid/empty.
+func NormalizeMACKey(mac string) string {
+	mac = strings.TrimSpace(mac)
+	if mac == "" {
+		return ""
+	}
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		return ""
+	}
+	return strings.ToUpper(hw.String())
 }
 
 type Scan struct {
@@ -116,7 +132,13 @@ func (db *DB) GetAllHosts() ([]Host, error) {
 		hosts = append(hosts, h)
 	}
 
-	return hosts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := db.attachDisplayNames(hosts); err != nil {
+		return nil, err
+	}
+	return hosts, nil
 }
 
 // GetHostsWithIPAddresses returns hosts that have a stored IP (for MAC resolution, etc.).
@@ -155,6 +177,79 @@ func (db *DB) GetHostsWithIPAddresses() ([]Host, error) {
 	return hosts, rows.Err()
 }
 
+func (db *DB) allHostLabelsMap() (map[string]string, error) {
+	rows, err := db.Query(`SELECT mac_address, label FROM host_labels`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]string)
+	for rows.Next() {
+		var mac, label string
+		if err := rows.Scan(&mac, &label); err != nil {
+			return nil, err
+		}
+		m[mac] = label
+	}
+	return m, rows.Err()
+}
+
+func (db *DB) attachDisplayNames(hosts []Host) error {
+	if len(hosts) == 0 {
+		return nil
+	}
+	labels, err := db.allHostLabelsMap()
+	if err != nil {
+		return err
+	}
+	for i := range hosts {
+		key := NormalizeMACKey(hosts[i].MacAddress)
+		if key == "" {
+			continue
+		}
+		if lbl, ok := labels[key]; ok {
+			hosts[i].DisplayName = lbl
+		}
+	}
+	return nil
+}
+
+func (db *DB) attachDisplayNameOne(h *Host) error {
+	key := NormalizeMACKey(h.MacAddress)
+	if key == "" {
+		return nil
+	}
+	var label string
+	err := db.QueryRow(`SELECT label FROM host_labels WHERE mac_address = ?`, key).Scan(&label)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	h.DisplayName = label
+	return nil
+}
+
+// UpsertHostLabel stores or updates the user-visible name for a MAC address (mac must parse with net.ParseMAC).
+func (db *DB) UpsertHostLabel(macKey, label string) error {
+	_, err := db.Exec(`
+		INSERT INTO host_labels (mac_address, label, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(mac_address) DO UPDATE SET
+			label = excluded.label,
+			updated_at = excluded.updated_at
+	`, macKey, label, time.Now())
+	return err
+}
+
+// DeleteHostLabel removes a custom name for the given canonical MAC key.
+func (db *DB) DeleteHostLabel(macKey string) error {
+	_, err := db.Exec(`DELETE FROM host_labels WHERE mac_address = ?`, macKey)
+	return err
+}
+
 // GetHost retrieves a single host by hostname
 func (db *DB) GetHost(hostname string) (*Host, error) {
 	query := `SELECT hostname, mac_address, ip_address, first_seen, last_seen, ports 
@@ -177,6 +272,9 @@ func (db *DB) GetHost(hostname string) (*Host, error) {
 		h.Ports = ports.String
 	}
 
+	if err := db.attachDisplayNameOne(&h); err != nil {
+		return nil, err
+	}
 	return &h, nil
 }
 
