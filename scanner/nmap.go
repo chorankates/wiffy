@@ -76,6 +76,76 @@ func macScanExec(nmapArgs []string) (*exec.Cmd, string) {
 		fmt.Sprintf("$ sudo nmap %s", strings.Join(nmapArgs, " "))
 }
 
+// nmapSPingMACs runs privileged nmap -sP on targets and parses normal (non-greppable) output for
+// IP → MAC pairs. ARP-derived MACs appear in this mode; they are not included in -oG deep-scan output.
+func (s *Scanner) nmapSPingMACs(targets []string, progressChan chan<- string) (map[string]string, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	nmapArgs := append([]string{"-sP"}, targets...)
+	cmd, cmdStr := macScanExec(nmapArgs)
+	progressChan <- cmdStr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start nmap: %w", err)
+	}
+
+	go func() {
+		stderrScanner := bufio.NewScanner(stderr)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			if line != "" {
+				progressChan <- fmt.Sprintf("[stderr] %s", line)
+			}
+		}
+	}()
+
+	reportWithName := regexp.MustCompile(`^Nmap scan report for .+ \((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)\s*$`)
+	reportIPOnly := regexp.MustCompile(`^Nmap scan report for (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*$`)
+	macRegex := regexp.MustCompile(`MAC Address: ([0-9A-Fa-f:]+)`)
+
+	sc := bufio.NewScanner(stdout)
+	macs := make(map[string]string)
+	var pendingIP string
+
+	for sc.Scan() {
+		line := sc.Text()
+		if line != "" {
+			progressChan <- fmt.Sprintf("[nmap] %s", line)
+		}
+
+		if m := reportWithName.FindStringSubmatch(line); len(m) == 2 {
+			pendingIP = m[1]
+			continue
+		}
+		if m := reportIPOnly.FindStringSubmatch(line); len(m) == 2 {
+			pendingIP = m[1]
+			continue
+		}
+
+		if m := macRegex.FindStringSubmatch(line); len(m) > 1 && pendingIP != "" {
+			macs[pendingIP] = m[1]
+			pendingIP = ""
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return macs, fmt.Errorf("nmap -sP (MAC pre-scan) failed: %w", err)
+	}
+
+	return macs, nil
+}
+
 // QuickScan performs a quick ping scan to discover hosts
 func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<- string) error {
 	progressChan <- "Starting quick scan..."
@@ -281,26 +351,41 @@ func (s *Scanner) MacScan(targetRange string, scanID int64, progressChan chan<- 
 	return nil
 }
 
-// DeepScan performs a deep scan with port scanning for hosts already stored with an IP address.
-// targetRange may be empty (all such hosts) or a CIDR to limit which stored IPs are scanned (same rules as MacScan).
-// On Unix, nmap is run under sudo (see macScanExec) so ARP-derived MACs match MAC scan behavior and are trustworthy to persist.
+// DeepScan performs a deep scan with port scanning.
+// When targetRange is provided, that explicit nmap target is scanned directly.
+// When targetRange is empty, scan falls back to hosts already stored with an IP address.
+// MAC addresses are resolved with a privileged nmap -sP pass first; greppable port scan output does not
+// include ARP-derived MACs. Both phases use sudo on Unix (see macScanExec).
 func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<- string) error {
 	progressChan <- "Starting deep scan with port discovery..."
 
-	hosts, err := s.hostsMatchingTargetRange(targetRange)
+	targetRange = strings.TrimSpace(targetRange)
+	var scanTargets []string
+	if targetRange != "" {
+		scanTargets = []string{targetRange}
+	} else {
+		hosts, err := s.db.GetHostsWithIPAddresses()
+		if err != nil {
+			return fmt.Errorf("failed to list hosts: %w", err)
+		}
+		if len(hosts) == 0 {
+			progressChan <- "No known hosts with IP addresses available for deep scan."
+			s.db.UpdateScan(scanID, "completed", 0, "")
+			return nil
+		}
+		for _, h := range hosts {
+			scanTargets = append(scanTargets, h.IPAddress)
+		}
+	}
+
+	progressChan <- "Resolving MAC addresses (privileged -sP)..."
+	macByIP, err := s.nmapSPingMACs(scanTargets, progressChan)
 	if err != nil {
 		return err
 	}
-	if len(hosts) == 0 {
-		progressChan <- "No known hosts with IP addresses match this scan."
-		s.db.UpdateScan(scanID, "completed", 0, "")
-		return nil
-	}
 
-	args := []string{"-T4", "-F", "-sV", "-oG", "-"}
-	for _, h := range hosts {
-		args = append(args, h.IPAddress)
-	}
+	args := []string{"-Pn", "-T4", "-F", "-sV", "-oG", "-"}
+	args = append(args, scanTargets...)
 
 	cmd, cmdStr := macScanExec(args)
 	progressChan <- cmdStr
@@ -392,9 +477,14 @@ func (s *Scanner) DeepScan(targetRange string, scanID int64, progressChan chan<-
 				}
 			}
 
-			// Extract MAC address
+			// Extract MAC address (usually absent in -oG; filled from -sP pre-scan)
 			if matches := macRegex.FindStringSubmatch(line); len(matches) > 1 {
 				currentHost.MacAddress = matches[1]
+			}
+			if currentHost.MacAddress == "" && macByIP != nil {
+				if m, ok := macByIP[currentHost.IPAddress]; ok {
+					currentHost.MacAddress = m
+				}
 			}
 
 			// Extract ports when nmap puts them on the same line as status

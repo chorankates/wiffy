@@ -718,7 +718,7 @@
                                 placeholder="e.g., 192.168.1.0/24"
                             >
                             <p class="form-hint" style="margin-top: 6px; font-size: 0.85em; color: #666;">
-                                Required for quick scan. For deep and MAC scans, optional CIDR to limit which stored IPs are scanned or probed; leave empty for all known IPs.
+                                Required for quick scan. For deep scan, this field is scanned directly; if left empty, deep scan uses known IPs. For MAC scan, optional CIDR filter over known IPs.
                             </p>
                         </div>
 
@@ -803,6 +803,16 @@
             <div class="detail-row">
                 <div class="detail-label">IP Address</div>
                 <div class="detail-value" id="detailIP">-</div>
+            </div>
+
+            <div class="detail-row detail-host-scan">
+                <div class="detail-label">Deep scan</div>
+                <div>
+                    <div class="display-name-actions">
+                        <button type="button" class="btn-secondary" id="detailDeepScanBtn">Scan this IP only</button>
+                    </div>
+                    <div class="detail-hint" id="detailDeepScanHint">Port discovery and MAC resolution for this address (same as a deep scan with this IP as the target).</div>
+                </div>
             </div>
             
             <div class="detail-row">

@@ -70,6 +70,7 @@ function handleWebSocketMessage(data) {
         const statusText = data.status === 'completed' ? 'COMPLETED' : 'FAILED';
         addActivityItem(`Scan ${statusText}: ${data.error || 'Successfully finished'}`, status, statusText);
         refreshAll();
+        refreshOpenHostModal();
     } else if (data.type === 'scan_started') {
         addActivityItem(data.message, 'scan-started', 'STARTED');
     } else if (data.type === 'connected') {
@@ -356,6 +357,13 @@ function refreshAll() {
     fetchRecentScans();
 }
 
+function refreshOpenHostModal() {
+    if (!modalHost || !modalHost.hostname) {
+        return;
+    }
+    showHostDetail(modalHost.hostname).catch((err) => console.error('Error refreshing host modal:', err));
+}
+
 function activateTab(targetPanelId) {
     const buttons = document.querySelectorAll('.tab-btn');
     const panels = document.querySelectorAll('.tab-panel');
@@ -462,6 +470,14 @@ async function showHostDetail(hostname) {
         const ipEl = document.getElementById('detailIP');
         ipEl.textContent = host.ip_address || 'Not available';
         ipEl.className = host.ip_address ? 'detail-value' : 'detail-value empty';
+
+        const deepScanBtn = document.getElementById('detailDeepScanBtn');
+        const deepScanHint = document.getElementById('detailDeepScanHint');
+        const hasIP = !!(host.ip_address && String(host.ip_address).trim() !== '');
+        deepScanBtn.disabled = !hasIP;
+        deepScanHint.textContent = hasIP
+            ? 'Port discovery and MAC resolution for this address (same as a deep scan with this IP as the target).'
+            : 'No IP on record; run a quick scan first.';
         
         const macEl = document.getElementById('detailMAC');
         macEl.textContent = host.mac_address || 'Not available';
@@ -550,6 +566,21 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.getElementById('saveDisplayNameBtn').addEventListener('click', saveHostDisplayName);
+
+document.getElementById('detailDeepScanBtn').addEventListener('click', async () => {
+    if (!modalHost || !modalHost.ip_address || !String(modalHost.ip_address).trim()) {
+        return;
+    }
+    const ip = modalHost.ip_address.trim();
+    const btn = document.getElementById('detailDeepScanBtn');
+    btn.disabled = true;
+    try {
+        await startScan('deep', ip);
+    } finally {
+        const stillHasIp = modalHost && modalHost.ip_address && String(modalHost.ip_address).trim() !== '';
+        btn.disabled = !stillHasIp;
+    }
+});
 
 document.getElementById('detailDisplayName').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {

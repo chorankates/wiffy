@@ -141,7 +141,7 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 
 type ScanRequest struct {
 	ScanType    string `json:"scan_type"`    // "quick", "deep", or "mac"
-	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"; required for "quick"; optional CIDR filter for "mac" and "deep" (same semantics: empty = all stored IPs; non-empty = limit to CIDR)
+	TargetRange string `json:"target_range"` // e.g., "192.168.1.0/24"; required for "quick"; for "deep": explicit target when non-empty, fallback to known IPs when empty; for "mac": optional CIDR filter over known IPs
 }
 
 func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
