@@ -146,16 +146,8 @@ func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<
 				result.MacAddress = matches[1]
 			}
 
-			// Save to database
 			if result.IPAddress != "" {
-				host := database.Host{
-					Hostname:   result.Hostname,
-					IPAddress:  result.IPAddress,
-					MacAddress: result.MacAddress,
-					LastSeen:   time.Now(),
-				}
-
-				if err := s.db.UpsertHost(host); err == nil {
+				if err := s.saveHostResult(&result); err == nil {
 					hostsFound++
 					progressChan <- fmt.Sprintf("Found: %s (%s)", result.Hostname, result.IPAddress)
 				}
@@ -441,12 +433,33 @@ func (s *Scanner) saveHostResult(result *ScanResult) error {
 	}
 
 	macAddr := result.MacAddress
-	if existing, err := s.db.GetHost(result.Hostname); err == nil {
+	var existing *database.Host
+	var err error
+	if macAddr != "" {
+		existing, err = s.db.GetHostByMAC(macAddr)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	if existing == nil {
+		existing, err = s.db.GetHost(result.Hostname)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	if existing != nil {
 		if macAddr == "" {
 			macAddr = existing.MacAddress
 		}
-	} else if err != sql.ErrNoRows {
-		return err
+		// Preserve previously discovered ports for scans that don't collect ports.
+		if portsJSON == "" {
+			portsJSON = existing.Ports
+		}
+		// MAC is the stable host identity; keep canonical hostname when MAC matches.
+		if macAddr != "" && existing.MacAddress != "" &&
+			database.NormalizeMACKey(macAddr) == database.NormalizeMACKey(existing.MacAddress) {
+			result.Hostname = existing.Hostname
+		}
 	}
 
 	host := database.Host{

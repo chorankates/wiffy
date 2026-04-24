@@ -85,10 +85,13 @@ func (db *DB) UpsertHost(host Host) error {
 	if host.LastSeen.IsZero() {
 		host.LastSeen = now
 	}
+	if macKey := NormalizeMACKey(host.MacAddress); macKey != "" {
+		host.MacAddress = macKey
+	}
 
 	query := `
 		INSERT INTO hosts (hostname, mac_address, ip_address, first_seen, last_seen, ports)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''))
 		ON CONFLICT(hostname) DO UPDATE SET
 			mac_address = COALESCE(excluded.mac_address, hosts.mac_address),
 			ip_address = COALESCE(excluded.ip_address, hosts.ip_address),
@@ -264,6 +267,38 @@ func (db *DB) GetHost(hostname string) (*Host, error) {
 
 	if mac.Valid {
 		h.MacAddress = mac.String
+	}
+	if ip.Valid {
+		h.IPAddress = ip.String
+	}
+	if ports.Valid {
+		h.Ports = ports.String
+	}
+
+	if err := db.attachDisplayNameOne(&h); err != nil {
+		return nil, err
+	}
+	return &h, nil
+}
+
+// GetHostByMAC retrieves a single host by MAC address using canonical MAC matching.
+func (db *DB) GetHostByMAC(mac string) (*Host, error) {
+	macKey := NormalizeMACKey(mac)
+	if macKey == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	query := `SELECT hostname, mac_address, ip_address, first_seen, last_seen, ports
+			  FROM hosts WHERE UPPER(mac_address) = ? LIMIT 1`
+
+	var h Host
+	var macValue, ip, ports sql.NullString
+	err := db.QueryRow(query, macKey).Scan(&h.Hostname, &macValue, &ip, &h.FirstSeen, &h.LastSeen, &ports)
+	if err != nil {
+		return nil, err
+	}
+	if macValue.Valid {
+		h.MacAddress = macValue.String
 	}
 	if ip.Valid {
 		h.IPAddress = ip.String
