@@ -356,6 +356,39 @@ function refreshAll() {
     fetchRecentScans();
 }
 
+function activateTab(targetPanelId) {
+    const buttons = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.tab-panel');
+    buttons.forEach((btn) => {
+        const isActive = btn.dataset.tabTarget === targetPanelId;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    panels.forEach((panel) => {
+        panel.classList.toggle('active', panel.id === targetPanelId);
+    });
+}
+
+function initializeTabs() {
+    const tabList = document.querySelector('.tabs');
+    if (!tabList) {
+        return;
+    }
+
+    tabList.addEventListener('click', (event) => {
+        const button = event.target.closest('.tab-btn');
+        if (!button) {
+            return;
+        }
+        const targetPanelId = button.dataset.tabTarget;
+        if (!targetPanelId) {
+            return;
+        }
+        event.preventDefault();
+        activateTab(targetPanelId);
+    });
+}
+
 // Event listeners
 document.getElementById('scanForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -392,6 +425,7 @@ async function loadSuggestedRange() {
 }
 
 // Initialize
+initializeTabs();
 connectWebSocket();
 refreshAll();
 loadSuggestedRange();
