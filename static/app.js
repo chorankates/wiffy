@@ -4,6 +4,10 @@ let reconnectInterval = null;
 
 /** Host object from API while the detail modal is open */
 let modalHost = null;
+const hostsSortState = {
+    key: 'lastSeen',
+    direction: 'desc',
+};
 
 function effectiveDisplayName(host) {
     if (!host) {
@@ -177,7 +181,9 @@ async function fetchHosts() {
             return;
         }
         
-        tbody.innerHTML = hosts.map(host => {
+        const sortedHosts = sortHosts(hosts, hostsSortState);
+
+        tbody.innerHTML = sortedHosts.map(host => {
             const ports = parsePortsField(host.ports);
             const portsBadges = renderHostTablePortBadges(ports);
             
@@ -204,6 +210,89 @@ async function fetchHosts() {
     } catch (error) {
         console.error('Error fetching hosts:', error);
     }
+}
+
+function parseTimestamp(value) {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? 0 : ms;
+}
+
+function parsePortCount(portsJson) {
+    return parsePortsField(portsJson).length;
+}
+
+function compareStrings(a, b) {
+    return String(a || '').localeCompare(String(b || ''), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+    });
+}
+
+function compareHosts(a, b, key) {
+    switch (key) {
+    case 'name':
+        return compareStrings(effectiveDisplayName(a), effectiveDisplayName(b));
+    case 'ip':
+        return compareStrings(a.ip_address, b.ip_address);
+    case 'mac':
+        return compareStrings(a.mac_address, b.mac_address);
+    case 'ports':
+        return parsePortCount(a.ports) - parsePortCount(b.ports);
+    case 'lastSeen':
+    default:
+        return parseTimestamp(a.last_seen) - parseTimestamp(b.last_seen);
+    }
+}
+
+function sortHosts(hosts, sortState) {
+    const direction = sortState.direction === 'asc' ? 1 : -1;
+    return [...hosts].sort((a, b) => compareHosts(a, b, sortState.key) * direction);
+}
+
+function updateHostSortHeaders() {
+    const headers = document.querySelectorAll('.hosts-table th.sortable');
+    headers.forEach((header) => {
+        const key = header.dataset.sortKey;
+        const indicator = header.querySelector('.sort-indicator');
+        const isActive = key === hostsSortState.key;
+        const ariaSort = isActive
+            ? (hostsSortState.direction === 'asc' ? 'ascending' : 'descending')
+            : 'none';
+        header.setAttribute('aria-sort', ariaSort);
+        if (indicator) {
+            indicator.textContent = isActive
+                ? (hostsSortState.direction === 'asc' ? '▲' : '▼')
+                : '-';
+        }
+    });
+}
+
+function initializeHostTableSorting() {
+    const table = document.getElementById('hostsTable');
+    if (!table) {
+        return;
+    }
+
+    table.querySelectorAll('th.sortable').forEach((header) => {
+        header.addEventListener('click', () => {
+            const key = header.dataset.sortKey;
+            if (!key) {
+                return;
+            }
+
+            if (hostsSortState.key === key) {
+                hostsSortState.direction = hostsSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                hostsSortState.key = key;
+                hostsSortState.direction = key === 'lastSeen' ? 'desc' : 'asc';
+            }
+
+            updateHostSortHeaders();
+            fetchHosts();
+        });
+    });
+
+    updateHostSortHeaders();
 }
 
 async function fetchRecentScans() {
@@ -434,6 +523,7 @@ async function loadSuggestedRange() {
 
 // Initialize
 initializeTabs();
+initializeHostTableSorting();
 connectWebSocket();
 refreshAll();
 loadSuggestedRange();

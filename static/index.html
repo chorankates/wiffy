@@ -338,12 +338,46 @@
             color: #555;
         }
 
+        .hosts-table th.sortable {
+            padding: 0;
+        }
+
+        .hosts-table th.sortable button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            font: inherit;
+            color: inherit;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hosts-table th.sortable button:hover {
+            background: #eceffb;
+        }
+
+        .sort-indicator {
+            font-size: 0.85em;
+            color: #8a8a8a;
+            min-width: 0.9em;
+        }
+
+        .hosts-table th[aria-sort="ascending"] .sort-indicator,
+        .hosts-table th[aria-sort="descending"] .sort-indicator {
+            color: #4d5ab0;
+        }
+
         .hosts-table tr:hover {
             background: #f9f9f9;
         }
 
         .hosts-table-container {
-            max-height: 600px;
+            max-height: none;
             overflow-y: auto;
         }
 
@@ -755,11 +789,11 @@
                         <table class="hosts-table" id="hostsTable">
                             <thead>
                                 <tr>
-                                    <th>Name</th>
-                                    <th>IP Address</th>
-                                    <th>MAC Address</th>
-                                    <th>Open Ports</th>
-                                    <th>Last Seen</th>
+                                    <th class="sortable" data-sort-key="name" aria-sort="none"><button type="button">Name <span class="sort-indicator">-</span></button></th>
+                                    <th class="sortable" data-sort-key="ip" aria-sort="none"><button type="button">IP Address <span class="sort-indicator">-</span></button></th>
+                                    <th class="sortable" data-sort-key="mac" aria-sort="none"><button type="button">MAC Address <span class="sort-indicator">-</span></button></th>
+                                    <th class="sortable" data-sort-key="ports" aria-sort="none"><button type="button">Open Ports <span class="sort-indicator">-</span></button></th>
+                                    <th class="sortable" data-sort-key="lastSeen" aria-sort="descending"><button type="button">Last Seen <span class="sort-indicator">▼</span></button></th>
                                 </tr>
                             </thead>
                             <tbody id="hostsTableBody">
