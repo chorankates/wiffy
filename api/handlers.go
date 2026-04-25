@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -174,7 +175,7 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start scan in background (MAC scan uses raw target_range for optional CIDR filter)
-	go s.runScan(scanID, req.ScanType, req.TargetRange)
+	go s.runScan(scanID, req.ScanType, req.TargetRange, displayRange)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -183,17 +184,25 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) runScan(scanID int64, scanType, targetRange string) {
+func (s *Server) runScan(scanID int64, scanType, targetRange, displayTarget string) {
 	progressChan := make(chan string, 100)
+	scanMeta := map[string]interface{}{
+		"scan_type":    scanType,
+		"target_range": displayTarget,
+	}
 
 	// Forward progress messages to WebSocket clients
 	go func() {
 		for msg := range progressChan {
-			s.broadcastMessage(map[string]interface{}{
+			payload := map[string]interface{}{
 				"type":    "scan_progress",
 				"scan_id": scanID,
 				"message": msg,
-			})
+			}
+			for k, v := range scanMeta {
+				payload[k] = v
+			}
+			s.broadcastMessage(payload)
 		}
 	}()
 
@@ -211,18 +220,26 @@ func (s *Server) runScan(scanID int64, scanType, targetRange string) {
 
 	if err != nil {
 		s.db.UpdateScan(scanID, "failed", 0, err.Error())
-		s.broadcastMessage(map[string]interface{}{
+		payload := map[string]interface{}{
 			"type":    "scan_complete",
 			"scan_id": scanID,
 			"status":  "failed",
 			"error":   err.Error(),
-		})
+		}
+		for k, v := range scanMeta {
+			payload[k] = v
+		}
+		s.broadcastMessage(payload)
 	} else {
-		s.broadcastMessage(map[string]interface{}{
+		payload := map[string]interface{}{
 			"type":    "scan_complete",
 			"scan_id": scanID,
 			"status":  "completed",
-		})
+		}
+		for k, v := range scanMeta {
+			payload[k] = v
+		}
+		s.broadcastMessage(payload)
 	}
 }
 
@@ -444,6 +461,8 @@ func (s *Server) writePump(client *wsClient) {
 }
 
 func (s *Server) broadcastMessage(msg interface{}) {
+	s.logActivityMirror(msg)
+
 	s.wsConnsMux.RLock()
 	defer s.wsConnsMux.RUnlock()
 
@@ -457,3 +476,49 @@ func (s *Server) broadcastMessage(msg interface{}) {
 	}
 }
 
+// logActivityMirror writes the same scan messages that appear in the UI activity
+// feed (not the nmap console strip) to the process logger.
+func (s *Server) logActivityMirror(msg interface{}) {
+	m, ok := msg.(map[string]interface{})
+	if !ok {
+		return
+	}
+	typ, _ := m["type"].(string)
+	switch typ {
+	case "scan_progress":
+		text, ok := m["message"].(string)
+		if !ok || text == "" {
+			return
+		}
+		if strings.HasPrefix(text, "$") || strings.HasPrefix(text, "[nmap]") || strings.HasPrefix(text, "[stderr]") {
+			return
+		}
+		st, tr := activityScanContext(m)
+		log.Printf("activity scan_id=%v type=%s target=%q %s", m["scan_id"], st, tr, text)
+	case "scan_complete":
+		sid := m["scan_id"]
+		st, tr := activityScanContext(m)
+		status, _ := m["status"].(string)
+		errMsg, _ := m["error"].(string)
+		if status == "completed" {
+			if errMsg == "" {
+				errMsg = "Successfully finished"
+			}
+			log.Printf("activity scan_id=%v type=%s target=%q Scan COMPLETED: %s", sid, st, tr, errMsg)
+		} else {
+			log.Printf("activity scan_id=%v type=%s target=%q Scan FAILED: %s", sid, st, tr, errMsg)
+		}
+	}
+}
+
+func activityScanContext(m map[string]interface{}) (scanType, targetRange string) {
+	scanType, _ = m["scan_type"].(string)
+	targetRange, _ = m["target_range"].(string)
+	if scanType == "" {
+		scanType = "?"
+	}
+	if targetRange == "" {
+		targetRange = "?"
+	}
+	return scanType, targetRange
+}
