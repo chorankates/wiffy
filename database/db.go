@@ -22,6 +22,7 @@ type Host struct {
 	Hostname    string    `json:"hostname"`
 	DisplayName string    `json:"display_name,omitempty"` // user label for this MAC; UI prefers over Hostname
 	MacAddress  string    `json:"mac_address,omitempty"`
+	Vendor      string    `json:"vendor,omitempty"` // from MAC OUI; filled in at read time, not stored
 	IPAddress   string    `json:"ip_address,omitempty"`
 	FirstSeen   time.Time `json:"first_seen"`
 	LastSeen    time.Time `json:"last_seen"`

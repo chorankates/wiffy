@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/conor/wiffy/database"
+	"github.com/conor/wiffy/oui"
 	"github.com/conor/wiffy/scanner"
 )
 
@@ -79,6 +80,9 @@ func (s *Server) handleGetHosts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	for i := range hosts {
+		hosts[i].Vendor = oui.Lookup(hosts[i].MacAddress)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(hosts)
@@ -135,6 +139,7 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Host not found", http.StatusNotFound)
 		return
 	}
+	host.Vendor = oui.Lookup(host.MacAddress)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(host)

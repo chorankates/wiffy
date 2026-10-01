@@ -199,7 +199,7 @@ async function fetchHosts() {
                 <tr onclick="showHostDetail('${escapeHtml(host.hostname)}')">
                     <td><strong>${escapeHtml(displayName)}</strong></td>
                     <td>${escapeHtml(host.ip_address || '-')}</td>
-                    <td><code>${escapeHtml(host.mac_address || '-')}</code></td>
+                    <td><code>${escapeHtml(host.mac_address || '-')}</code>${host.vendor ? `<div class="mac-vendor">${escapeHtml(host.vendor)}</div>` : ''}</td>
                     <td>${portsBadges}</td>
                     <td>
                         <span class="status-badge ${statusClass}">${statusText}</span>
@@ -570,7 +570,9 @@ async function showHostDetail(hostname) {
             : 'No IP on record; run a quick scan first.';
         
         const macEl = document.getElementById('detailMAC');
-        macEl.textContent = host.mac_address || 'Not available';
+        macEl.textContent = host.mac_address
+            ? (host.vendor ? `${host.mac_address} (${host.vendor})` : host.mac_address)
+            : 'Not available';
         macEl.className = host.mac_address ? 'detail-value' : 'detail-value empty';
         
         const firstSeen = new Date(host.first_seen);
