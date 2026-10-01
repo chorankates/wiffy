@@ -8,8 +8,8 @@ network scanner frontend for keeping track of devices on your local wifi network
 
 - Go 1.21 or later
 - nmap installed on your system
-- for MAC scans to work, you'll need a sudoers entry like
-`<username> ALL=(root) NOPASSWD: /path/to/nmap`
+- scans run nmap via sudo, so you need passwordless sudo for nmap: `make sudoers` installs
+`<username> ALL=(root) NOPASSWD: /path/to/nmap` to `/etc/sudoers.d/wiffy` (`make uninstall-sudoers` removes it)
 
 ## API
 

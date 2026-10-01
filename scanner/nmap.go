@@ -156,12 +156,11 @@ func (s *Scanner) nmapSPingMACs(targets []string, progressChan chan<- string) (m
 func (s *Scanner) QuickScan(targetRange string, scanID int64, progressChan chan<- string) error {
 	progressChan <- "Starting quick scan..."
 
-	// Use nmap with -sn (ping scan, no port scan) for quick discovery
+	// Use nmap with -sn (ping scan, no port scan) for quick discovery. Run privileged: unprivileged -sn only
+	// tries TCP connects to 80/443, so devices with no listening ports (phones, tablets) look down.
+	// As root, nmap uses ARP on the local subnet and ICMP elsewhere.
 	args := []string{"-sn", "-oG", "-", targetRange}
-	cmd := exec.Command("nmap", args...)
-
-	// Show the actual command
-	cmdStr := fmt.Sprintf("$ nmap %s", strings.Join(args, " "))
+	cmd, cmdStr := macScanExec(args)
 	progressChan <- cmdStr
 
 	stdout, err := cmd.StdoutPipe()
@@ -580,7 +579,7 @@ func parsePortEntries(portsStr string) []PortEntry {
 		if entry == "" {
 			continue
 		}
-		parts := strings.SplitN(entry, "/", 7)
+		parts := strings.Split(entry, "/") // port/state/proto/owner/service/rpcinfo/version/ (nmap escapes "/" in fields as "|")
 		if len(parts) < 3 {
 			continue
 		}
